@@ -28,30 +28,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🧠 AI-Powered HR Assistant")
+st.title("🧠 All-in-One AI HR Assistant")
 
-# Tabs for input
-tabs = st.tabs(["🔍 Job Description", "📁 Upload CVs", "📝 Paste Candidate Info"])
-
-# Load OpenRouter API key from secrets
-api_key = st.secrets["OPENROUTER_API_KEY"]
-
-# Tab 1: Job Description
-with tabs[0]:
-    job_description = st.text_area("📌 Enter Job Description / Role Requirements", height=200)
-
-# Tab 2: Upload ZIP
-with tabs[1]:
-    uploaded_zip = st.file_uploader("📁 Upload ZIP of candidate CVs (PDF, DOCX, TXT, scanned PDF)", type=["zip"])
-
-# Tab 3: Paste Candidate Info
-with tabs[2]:
-    pasted_candidates = st.text_area("📝 Paste multiple candidate resumes below (separate with ---)", height=300)
-
-# Process button
+# Input fields
+job_title = st.text_input("🎯 Hiring For (Job Title / Role)")
+job_description = st.text_area("📌 Job Description or Role Requirements", height=200)
+uploaded_zip = st.file_uploader("📁 Upload ZIP of candidate CVs (PDF, DOCX, TXT, scanned PDF)", type=["zip"])
+pasted_candidates = st.text_area("📝 Paste candidate data (separate candidates with ---)", height=300)
 process_button = st.button("🚀 Analyze Candidates")
 
-# Utility functions
+# Load OpenRouter API key from secrets
+api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+
+# Utility Functions
 def extract_pdf_text(pdf_path):
     try:
         doc = fitz.open(pdf_path)
@@ -59,7 +48,6 @@ def extract_pdf_text(pdf_path):
         for page in doc:
             txt = page.get_text()
             if not txt.strip():
-                # OCR fallback
                 pix = page.get_pixmap(dpi=300)
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 txt = pytesseract.image_to_string(img)
@@ -72,7 +60,9 @@ def extract_number(text):
     match = re.search(r"\d+", text)
     return int(match.group()) if match else 0
 
-def call_openrouter_api(prompt, api_key):
+def call_openrouter_api(prompt):
+    if not api_key:
+        return "No API key configured."
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -80,33 +70,30 @@ def call_openrouter_api(prompt, api_key):
     data = {
         "model": "openchat/openchat-3.5-0106",
         "messages": [
-            {"role": "system", "content": "You are a world-class HR agent. Provide structured and detailed insights."},
+            {"role": "system", "content": "You are a world-class HR AI assistant. Provide structured insights and explain rejections clearly."},
             {"role": "user", "content": prompt}
         ]
     }
     try:
         response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
         result = response.json()
-        if "choices" in result:
-            return result["choices"][0]["message"]["content"]
-        else:
-            return "API Error: No valid response"
+        return result.get("choices", [{}])[0].get("message", {}).get("content", "No response")
     except Exception as e:
         return f"API Error: {str(e)}"
 
-def generate_prompt(cv_text, job_description):
+def generate_prompt(cv_text, job_title, job_description):
     return f"""
 You are a world-class AI HR assistant.
 
-Given the following Job Description:
+We are hiring for the role: {job_title}
 
+Job Description:
 {job_description}
 
-And this Candidate Resume:
-
+Candidate Resume:
 {cv_text}
 
-Please analyze and return a structured report:
+Provide a structured report:
 ---
 Score: XX/100
 Recommendation: Strong Fit / Moderate Fit / Not Recommended
@@ -120,8 +107,6 @@ Red Flags (if any):
 - ...
 
 Role Fit Justification:
-- ...
-- ...
 - ...
 
 Skill Match Percentage: XX%
@@ -138,36 +123,32 @@ def extract_between(text, start_key, end_key=None):
     except:
         return "N/A"
 
-# Process logic
-if process_button and job_description and api_key:
-    with st.spinner("🤖 Processing candidates with AI... Please wait."):
+# Processing Logic
+if process_button and job_description and (uploaded_zip or pasted_candidates):
+    with st.spinner("🤖 AI analyzing candidates. Please wait..."):
         candidates = []
 
-        # If ZIP uploaded
         if uploaded_zip:
             with tempfile.TemporaryDirectory() as tmpdir:
                 zip_path = os.path.join(tmpdir, "uploaded.zip")
                 with open(zip_path, "wb") as f:
                     f.write(uploaded_zip.read())
-
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
                     zip_ref.extractall(tmpdir)
-
                 for file in os.listdir(tmpdir):
                     if file.lower().endswith(".pdf"):
                         path = os.path.join(tmpdir, file)
                         text = extract_pdf_text(path)
                         candidates.append((file, text))
 
-        # If pasted
         if pasted_candidates:
             for i, chunk in enumerate(pasted_candidates.split("---")):
                 candidates.append((f"Pasted_Candidate_{i+1}.txt", chunk.strip()))
 
         results = []
         for name, cv_text in candidates:
-            prompt = generate_prompt(cv_text, job_description)
-            ai_response = call_openrouter_api(prompt, api_key)
+            prompt = generate_prompt(cv_text, job_title, job_description)
+            ai_response = call_openrouter_api(prompt)
             score = extract_number(extract_between(ai_response, "Score:", "\n"))
             rec = extract_between(ai_response, "Recommendation:", "\n")
             match_pct = extract_number(extract_between(ai_response, "Skill Match Percentage:", "\n"))
@@ -199,16 +180,9 @@ if process_button and job_description and api_key:
             filtered_df = df[df["Score"] >= min_score]
 
             st.markdown(f"**🧑‍💼 {len(filtered_df)} candidates meet the criteria.**")
-
-            # Visuals
-            score_chart = px.bar(filtered_df, x="Candidate", y="Score", color="Recommendation", text="Score")
-            st.plotly_chart(score_chart, use_container_width=True)
-
-            rec_pie = px.pie(filtered_df, names="Recommendation")
-            st.plotly_chart(rec_pie, use_container_width=True)
-
-            skill_chart = px.bar(filtered_df, x="Candidate", y="Skill Match %", color="Skill Match %")
-            st.plotly_chart(skill_chart, use_container_width=True)
+            st.plotly_chart(px.bar(filtered_df, x="Candidate", y="Score", color="Recommendation", text="Score"), use_container_width=True)
+            st.plotly_chart(px.pie(filtered_df, names="Recommendation"), use_container_width=True)
+            st.plotly_chart(px.bar(filtered_df, x="Candidate", y="Skill Match %", color="Skill Match %"), use_container_width=True)
 
             for _, row in filtered_df.iterrows():
                 with st.expander(f"📌 {row['Candidate']} — Score: {row['Score']} — {row['Recommendation']}"):
@@ -220,19 +194,7 @@ if process_button and job_description and api_key:
                     with st.expander("📄 Full AI Response"):
                         st.code(row["Full AI Analysis"], language="markdown")
 
-            st.markdown("## 🏆 Top Recommended Candidates")
-            top_candidates = df[
-                (df["Recommendation"].str.lower().str.contains("strong")) &
-                (df["Score"] >= 70)
-            ].sort_values(by="Score", ascending=False)
-
-            if not top_candidates.empty:
-                st.dataframe(top_candidates[["Candidate", "Score", "Skill Match %", "Experience (Years)", "Recommendation"]])
-            else:
-                st.info("No strong recommendations found yet. Try adjusting filters or reviewing moderate fits.")
-
-            csv_data = filtered_df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV Report", data=csv_data, file_name="AI_Hiring_Insights_Report.csv", mime="text/csv")
+            st.download_button("📥 Download CSV Report", data=filtered_df.to_csv(index=False).encode("utf-8"), file_name="AI_Hiring_Report.csv", mime="text/csv")
 else:
     if process_button:
-        st.error("⚠️ Please provide job description to proceed.")
+        st.error("⚠️ Please fill in the job title, description, and candidate data.")
