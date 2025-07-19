@@ -14,7 +14,7 @@ st.title("🧠 AI-Powered HR Assistant")
 st.markdown("Upload CVs (ZIP of PDFs) + Job Description → Get smart AI-driven candidate analysis.")
 
 # --------------- INPUT FIELDS --------------- #
-openrouter_key = st.text_input("🔐 Enter your OpenRouter API Key", type="password")
+openrouter_key = st.secrets["OPENROUTER_API_KEY"]
 job_description = st.text_area("📌 Enter Job Description / Role Requirements", height=200)
 uploaded_zip = st.file_uploader("📁 Upload ZIP file of candidate CVs (PDF only)", type="zip")
 process_button = st.button("🚀 Analyze Candidates")
