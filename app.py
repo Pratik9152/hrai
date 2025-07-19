@@ -1,19 +1,14 @@
 import streamlit as st
 import os
-import zipfile
-import tempfile
 import fitz  # PyMuPDF
-import pandas as pd
-import requests
-from io import BytesIO
-import plotly.express as px
-import re
 import pytesseract
 from PIL import Image
-import datetime
+import requests
+import re
 
-# Page Config
-st.set_page_config(page_title="HR AI - Candidate Analyzer", layout="wide")
+# Streamlit UI config
+st.set_page_config(page_title="AI HR Assistant", layout="wide")
+
 st.markdown("""
     <style>
     body {
@@ -29,197 +24,95 @@ st.markdown("""
     .stApp {
         background-color: #ffffffcc !important;
     }
-    .stButton>button {
-        background-color: #4CAF50;
-        color: white;
-        border-radius: 8px;
-        padding: 10px 16px;
-    }
-    .stTextInput>div>input, .stTextArea>div>textarea {
-        background-color: #f7fafd;
-        border: 1px solid #ccc;
-        border-radius: 8px;
-    }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🧠 All-in-One AI HR Assistant")
+st.title("🤖 World-Class AI HR Assistant")
 
-# Input fields
-job_title = st.text_input("🎯 Hiring For (Job Title / Role)")
-job_description = st.text_area("📌 Job Description or Role Requirements", height=200)
-custom_threshold = st.slider("📈 Minimum Fit Score Required", 0, 100, 50)
-uploaded_files = st.file_uploader("📁 Upload candidate CVs (PDF, DOCX, TXT, scanned PDF)", type=["pdf", "docx", "txt"], accept_multiple_files=True)
-pasted_candidates = st.text_area("📝 Paste candidate data (separate candidates with ---)", height=300)
-process_button = st.button("🚀 Analyze Candidates")
-
-# Load OpenRouter API key from secrets
+# Job input
+job_title = st.text_input("📌 Hiring for (Job Title)", value="Data Scientist")
+job_description = st.text_area("📄 Job Description", value="Looking for a data scientist with experience in Python, ML, and data analysis.")
+uploaded_files = st.file_uploader("📁 Upload CVs (PDF, scanned PDFs supported)", type=["pdf"], accept_multiple_files=True)
 api_key = st.secrets.get("OPENROUTER_API_KEY", "")
 
-# Skill Mapping by Role (Sample)
+# Skill mapping (optional preset)
 skill_map = {
-    "Data Scientist": ["Python", "Machine Learning", "Statistics", "Data Analysis"],
+    "Data Scientist": ["Python", "Machine Learning", "Data Analysis", "Statistics"],
     "Frontend Developer": ["HTML", "CSS", "JavaScript", "React"],
-    "HR Manager": ["Recruitment", "Onboarding", "HR Policies", "Employee Relations"],
+    "HR Manager": ["Recruitment", "Onboarding", "HR Policies"]
 }
 
-# Utility Functions
-def extract_pdf_text(pdf_path):
+# Extract text from PDFs (OCR fallback)
+def extract_text(file):
     try:
-        doc = fitz.open(pdf_path)
-        text = ""
+        doc = fitz.open(stream=file.read(), filetype="pdf")
+        full_text = ""
         for page in doc:
-            txt = page.get_text()
-            if not txt.strip():
+            text = page.get_text()
+            if not text.strip():
+                # Fallback: OCR image from scanned page
                 pix = page.get_pixmap(dpi=300)
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                txt = pytesseract.image_to_string(img)
-            text += txt + "\n"
-        return text
+                text = pytesseract.image_to_string(img)
+            full_text += text + "\n"
+        return full_text
     except Exception as e:
-        return f"Error reading {os.path.basename(pdf_path)}: {str(e)}"
+        return f"Error: {str(e)}"
 
-def extract_number(text):
-    match = re.search(r"\d+", text)
-    return int(match.group()) if match else 50
-
-def extract_between(text, start_key, end_key=None):
-    try:
-        pattern = re.escape(start_key) + r"(.*?)(?=" + re.escape(end_key) + r"|$)" if end_key else re.escape(start_key) + r"(.*)"
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        return match.group(1).strip() if match else "N/A"
-    except Exception:
-        return "N/A"
-
+# Send prompt to OpenRouter with GPT-4 Turbo or Mistral
 def call_openrouter_api(prompt):
-    if not api_key:
-        return "No API key configured."
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
     data = {
-        "model": "openchat/openchat-3.5-0106",
+        "model": "openai/gpt-4-turbo",  # or "mistralai/mistral-large"
         "messages": [
-            {"role": "system", "content": "You are a world-class HR AI assistant. Provide structured insights and clear ranking for best-fit candidates."},
+            {"role": "system", "content": "You are a world-class AI HR assistant. Give structured, helpful candidate evaluation."},
             {"role": "user", "content": prompt}
         ]
     }
     try:
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
-        result = response.json()
-        return result.get("choices", [{}])[0].get("message", {}).get("content", "No response")
+        res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+        return res.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        return f"API Error: {str(e)}"
+        return f"Error: {str(e)}"
 
+# Create the analysis prompt
 def generate_prompt(cv_text, job_title, job_description):
-    role_skills = skill_map.get(job_title, [])
-    skills_required = ", ".join(role_skills) if role_skills else "[Let AI infer skills]"
+    skills = skill_map.get(job_title, [])
+    skill_text = ", ".join(skills) if skills else "Let AI infer"
     return f"""
-You are a senior HR evaluator AI.
+We are hiring for: {job_title}
+Job Description: {job_description}
+Expected Skills: {skill_text}
 
-We are hiring for the role: {job_title}
-
-Job Description:
-{job_description}
-
-Key Skills Expected:
-{skills_required}
-
-Resume:
+Candidate Resume:
 {cv_text}
 
-Evaluate the following:
-1. Score out of 100 for fit.
-2. Skill Match Percentage.
-3. Experience Years.
-4. Top 3 Strengths.
-5. Red Flags or concerns.
-6. Justify role fit.
-7. If not recommended, explain why.
-8. Final Verdict: Strong Fit / Moderate Fit / Not Recommended.
-9. Provide a one-line recommendation: Should this candidate be hired or not with a reason.
-10. Summarize key insights and data extracted from resume (e.g., education, certifications, locations, tools used, etc.)
-
-Provide a structured report.
+Instructions:
+Evaluate this candidate based on the role.
+Return the following in clear format:
+🟢 AI Recommendation (Should be hired or not)
+📈 Fit Score (0–100)
+✅ Skill Match %
+⏳ Years of Relevant Experience
+💪 Top 3 Strengths
+⚠️ Red Flags or Concerns
+🧠 Why Selected or Not Selected
 """
 
-# Processing Logic
-if process_button and job_description and (uploaded_files or pasted_candidates):
-    with st.spinner("🤖 AI analyzing candidates. Please wait..."):
-        candidates = []
-
-        if uploaded_files:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                for file in uploaded_files:
-                    temp_path = os.path.join(tmpdir, file.name)
-                    with open(temp_path, "wb") as f:
-                        f.write(file.read())
-                    if file.name.lower().endswith(".pdf"):
-                        text = extract_pdf_text(temp_path)
-                        candidates.append((file.name, text))
-
-        if pasted_candidates:
-            for i, chunk in enumerate(pasted_candidates.split("---")):
-                candidates.append((f"Pasted_Candidate_{i+1}.txt", chunk.strip()))
-
-        results = []
-        for name, cv_text in candidates:
-            prompt = generate_prompt(cv_text, job_title, job_description)
-            ai_response = call_openrouter_api(prompt)
-            score = extract_number(extract_between(ai_response, "Score:"))
-            rec = extract_between(ai_response, "Final Verdict:", "\n")
-            match_pct = extract_number(extract_between(ai_response, "Skill Match Percentage:"))
-            exp_years = extract_between(ai_response, "Experience Years:", "\n")
-            strengths = extract_between(ai_response, "Top 3 Strengths:", "Red Flags")
-            red_flags = extract_between(ai_response, "Red Flags", "Justify")
-            justification = extract_between(ai_response, "Justify role fit:", "If not recommended")
-            why_not = extract_between(ai_response, "If not recommended, explain why:", "Final Verdict")
-            hiring_line = extract_between(ai_response, "Provide a one-line recommendation:")
-            summary_data = extract_between(ai_response, "Summarize key insights and data extracted from resume")
-
-            results.append({
-                "Candidate": name,
-                "Score": score,
-                "Recommendation": rec,
-                "Skill Match %": match_pct,
-                "Experience (Years)": exp_years,
-                "Top Strengths": strengths,
-                "Red Flags": red_flags,
-                "Fit Justification": justification,
-                "Why Not Selected": why_not,
-                "AI Recommendation": hiring_line,
-                "Resume Summary": summary_data,
-                "Full AI Analysis": ai_response
-            })
-
-        if results:
-            df = pd.DataFrame(results)
-            st.success("✅ AI Analysis Complete")
-            st.subheader("📊 Candidate Insights Dashboard")
-
-            filtered_df = df[df["Score"] >= custom_threshold]
-
-            st.markdown(f"**🧑‍💼 {len(filtered_df)} candidates meet the criteria.**")
-            st.plotly_chart(px.bar(filtered_df, x="Candidate", y="Score", color="Recommendation", text="Score"), use_container_width=True)
-            st.plotly_chart(px.pie(filtered_df, names="Recommendation"), use_container_width=True)
-            st.plotly_chart(px.bar(filtered_df, x="Candidate", y="Skill Match %", color="Skill Match %"), use_container_width=True)
-
-            for _, row in filtered_df.iterrows():
-                with st.expander(f"📌 {row['Candidate']} — Score: {row['Score']} — {row['Recommendation']}"):
-                    st.markdown(f"### 🟢 AI Recommendation: {row['AI Recommendation']}")
-                    st.markdown(f"**Top Strengths**:\n{row['Top Strengths']}")
-                    st.markdown(f"**Red Flags**:\n{row['Red Flags']}")
-                    st.markdown(f"**Fit Justification**:\n{row['Fit Justification']}")
-                    st.markdown(f"**Why Not Selected**: {row['Why Not Selected']}")
-                    st.markdown(f"**Skill Match %**: {row['Skill Match %']} | **Experience**: {row['Experience (Years)']}")
-                    st.markdown(f"**📌 Resume Summary**:\n{row['Resume Summary']}")
-                    with st.expander("📄 Full AI Response"):
-                        st.code(row["Full AI Analysis"], language="markdown")
-
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
-            csv_data = filtered_df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download Report as CSV", data=csv_data, file_name=f"AI_Hiring_Report_{timestamp}.csv", mime="text/csv")
-else:
-    if process_button:
-        st.error("⚠️ Please fill in the job title, description, and candidate data.")
+# Button to run analysis
+if st.button("🚀 Analyze CVs"):
+    if not api_key:
+        st.error("Missing OpenRouter API key. Add it to Streamlit secrets.")
+    elif not uploaded_files:
+        st.warning("Upload at least one CV.")
+    else:
+        for file in uploaded_files:
+            with st.spinner(f"Analyzing {file.name}..."):
+                text = extract_text(file)
+                prompt = generate_prompt(text, job_title, job_description)
+                result = call_openrouter_api(prompt)
+                st.subheader(f"📄 {file.name}")
+                st.markdown(result)
