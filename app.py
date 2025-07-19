@@ -49,7 +49,7 @@ st.title("🧠 All-in-One AI HR Assistant")
 job_title = st.text_input("🎯 Hiring For (Job Title / Role)")
 job_description = st.text_area("📌 Job Description or Role Requirements", height=200)
 custom_threshold = st.slider("📈 Minimum Fit Score Required", 0, 100, 50)
-uploaded_zip = st.file_uploader("📁 Upload ZIP of candidate CVs (PDF, DOCX, TXT, scanned PDF)", type=["zip"])
+uploaded_files = st.file_uploader("📁 Upload candidate CVs (PDF, DOCX, TXT, scanned PDF)", type=["pdf", "docx", "txt"], accept_multiple_files=True)
 pasted_candidates = st.text_area("📝 Paste candidate data (separate candidates with ---)", height=300)
 process_button = st.button("🚀 Analyze Candidates")
 
@@ -145,22 +145,19 @@ Provide a structured report.
 """
 
 # Processing Logic
-if process_button and job_description and (uploaded_zip or pasted_candidates):
+if process_button and job_description and (uploaded_files or pasted_candidates):
     with st.spinner("🤖 AI analyzing candidates. Please wait..."):
         candidates = []
 
-        if uploaded_zip:
+        if uploaded_files:
             with tempfile.TemporaryDirectory() as tmpdir:
-                zip_path = os.path.join(tmpdir, "uploaded.zip")
-                with open(zip_path, "wb") as f:
-                    f.write(uploaded_zip.read())
-                with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                    zip_ref.extractall(tmpdir)
-                for file in os.listdir(tmpdir):
-                    if file.lower().endswith(".pdf"):
-                        path = os.path.join(tmpdir, file)
-                        text = extract_pdf_text(path)
-                        candidates.append((file, text))
+                for file in uploaded_files:
+                    temp_path = os.path.join(tmpdir, file.name)
+                    with open(temp_path, "wb") as f:
+                        f.write(file.read())
+                    if file.name.lower().endswith(".pdf"):
+                        text = extract_pdf_text(temp_path)
+                        candidates.append((file.name, text))
 
         if pasted_candidates:
             for i, chunk in enumerate(pasted_candidates.split("---")):
