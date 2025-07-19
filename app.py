@@ -26,6 +26,20 @@ st.markdown("""
         50% {background-position: 100% 50%;}
         100% {background-position: 0% 50%;}
     }
+    .stApp {
+        background-color: #ffffffcc !important;
+    }
+    .stButton>button {
+        background-color: #4CAF50;
+        color: white;
+        border-radius: 8px;
+        padding: 10px 16px;
+    }
+    .stTextInput>div>input, .stTextArea>div>textarea {
+        background-color: #f7fafd;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -67,7 +81,7 @@ def extract_pdf_text(pdf_path):
 
 def extract_number(text):
     match = re.search(r"\d+", text)
-    return int(match.group()) if match else 50  # Default to 50 if not found
+    return int(match.group()) if match else 50
 
 def call_openrouter_api(prompt):
     if not api_key:
@@ -116,6 +130,7 @@ Evaluate the following:
 6. Justify role fit.
 7. If not recommended, explain why.
 8. Final Verdict: Strong Fit / Moderate Fit / Not Recommended.
+9. Provide a one-line recommendation: Should this candidate be hired or not with a reason.
 
 Provide a structured report.
 """
@@ -162,6 +177,7 @@ if process_button and job_description and (uploaded_zip or pasted_candidates):
             red_flags = extract_between(ai_response, "Red Flags", "Justify")
             justification = extract_between(ai_response, "Justify role fit:", "If not recommended")
             why_not = extract_between(ai_response, "If not recommended, explain why:", "Final Verdict")
+            hiring_line = extract_between(ai_response, "Provide a one-line recommendation:")
 
             results.append({
                 "Candidate": name,
@@ -173,6 +189,7 @@ if process_button and job_description and (uploaded_zip or pasted_candidates):
                 "Red Flags": red_flags,
                 "Fit Justification": justification,
                 "Why Not Selected": why_not,
+                "AI Recommendation": hiring_line,
                 "Full AI Analysis": ai_response
             })
 
@@ -190,6 +207,7 @@ if process_button and job_description and (uploaded_zip or pasted_candidates):
 
             for _, row in filtered_df.iterrows():
                 with st.expander(f"📌 {row['Candidate']} — Score: {row['Score']} — {row['Recommendation']}"):
+                    st.markdown(f"### 🟢 AI Recommendation: {row['AI Recommendation']}")
                     st.markdown(f"**Top Strengths**:\n{row['Top Strengths']}")
                     st.markdown(f"**Red Flags**:\n{row['Red Flags']}")
                     st.markdown(f"**Fit Justification**:\n{row['Fit Justification']}")
