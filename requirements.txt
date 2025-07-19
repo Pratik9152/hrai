@@ -1,5 +1,7 @@
-streamlit
-pymupdf
+streamlit>=1.26.0
 pandas
 requests
+PyMuPDF
+pytesseract
+pillow
 plotly
