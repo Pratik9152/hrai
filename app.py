@@ -10,6 +10,7 @@ import plotly.express as px
 import re
 import pytesseract
 from PIL import Image
+import datetime
 
 # Page Config
 st.set_page_config(page_title="HR AI - Candidate Analyzer", layout="wide")
@@ -70,7 +71,7 @@ def call_openrouter_api(prompt):
     data = {
         "model": "openchat/openchat-3.5-0106",
         "messages": [
-            {"role": "system", "content": "You are a world-class HR AI assistant. Provide structured insights and explain rejections clearly."},
+            {"role": "system", "content": "You are a world-class HR AI assistant. Provide structured insights and clear ranking for best-fit candidates."},
             {"role": "user", "content": prompt}
         ]
     }
@@ -83,36 +84,27 @@ def call_openrouter_api(prompt):
 
 def generate_prompt(cv_text, job_title, job_description):
     return f"""
-You are a world-class AI HR assistant.
+You are a senior HR evaluator AI.
 
 We are hiring for the role: {job_title}
 
 Job Description:
 {job_description}
 
-Candidate Resume:
+Resume:
 {cv_text}
 
-Provide a structured report:
----
-Score: XX/100
-Recommendation: Strong Fit / Moderate Fit / Not Recommended
+Evaluate the following:
+1. Score out of 100 for fit.
+2. Skill Match Percentage.
+3. Experience Years.
+4. Top 3 Strengths.
+5. Red Flags or concerns.
+6. Justify role fit.
+7. If not recommended, explain why.
+8. Final Verdict: Strong Fit / Moderate Fit / Not Recommended.
 
-Top 3 Strengths:
-1. ...
-2. ...
-3. ...
-
-Red Flags (if any):
-- ...
-
-Role Fit Justification:
-- ...
-
-Skill Match Percentage: XX%
-Years of Experience: X years
-Why Not Selected (if applicable): ...
----
+Provide a structured report.
 """
 
 def extract_between(text, start_key, end_key=None):
@@ -149,14 +141,14 @@ if process_button and job_description and (uploaded_zip or pasted_candidates):
         for name, cv_text in candidates:
             prompt = generate_prompt(cv_text, job_title, job_description)
             ai_response = call_openrouter_api(prompt)
-            score = extract_number(extract_between(ai_response, "Score:", "\n"))
-            rec = extract_between(ai_response, "Recommendation:", "\n")
-            match_pct = extract_number(extract_between(ai_response, "Skill Match Percentage:", "\n"))
-            exp_years = extract_between(ai_response, "Years of Experience:", "\n")
+            score = extract_number(extract_between(ai_response, "Score:"))
+            rec = extract_between(ai_response, "Final Verdict:", "\n")
+            match_pct = extract_number(extract_between(ai_response, "Skill Match Percentage:"))
+            exp_years = extract_between(ai_response, "Experience Years:", "\n")
             strengths = extract_between(ai_response, "Top 3 Strengths:", "Red Flags")
-            red_flags = extract_between(ai_response, "Red Flags", "Role Fit Justification")
-            justification = extract_between(ai_response, "Role Fit Justification:", "Skill Match")
-            why_not = extract_between(ai_response, "Why Not Selected", None)
+            red_flags = extract_between(ai_response, "Red Flags", "Justify")
+            justification = extract_between(ai_response, "Justify role fit:", "If not recommended")
+            why_not = extract_between(ai_response, "If not recommended, explain why:", "Final Verdict")
 
             results.append({
                 "Candidate": name,
@@ -194,7 +186,9 @@ if process_button and job_description and (uploaded_zip or pasted_candidates):
                     with st.expander("📄 Full AI Response"):
                         st.code(row["Full AI Analysis"], language="markdown")
 
-            st.download_button("📥 Download CSV Report", data=filtered_df.to_csv(index=False).encode("utf-8"), file_name="AI_Hiring_Report.csv", mime="text/csv")
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+            csv_data = filtered_df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Download Report as CSV", data=csv_data, file_name=f"AI_Hiring_Report_{timestamp}.csv", mime="text/csv")
 else:
     if process_button:
         st.error("⚠️ Please fill in the job title, description, and candidate data.")
