@@ -1,14 +1,23 @@
+# Paste this entire code into your app.py
+
 import streamlit as st
 import os
+import tempfile
 import fitz  # PyMuPDF
+import pandas as pd
+import requests
+from io import BytesIO
+import re
 import pytesseract
 from PIL import Image
-import requests
-import re
+import datetime
 
-# Streamlit UI config
+# Optional: for Windows
+# pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
 st.set_page_config(page_title="AI HR Assistant", layout="wide")
 
+# Styling
 st.markdown("""
     <style>
     body {
@@ -21,98 +30,162 @@ st.markdown("""
         50% {background-position: 100% 50%;}
         100% {background-position: 0% 50%;}
     }
-    .stApp {
-        background-color: #ffffffcc !important;
+    .best {
+        background-color: #d4edda;
+        padding: 8px;
+        border-radius: 8px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🤖 World-Class AI HR Assistant")
+st.title("🧠 AI HR Assistant - Resume Analyzer")
 
-# Job input
-job_title = st.text_input("📌 Hiring for (Job Title)", value="Data Scientist")
-job_description = st.text_area("📄 Job Description", value="Looking for a data scientist with experience in Python, ML, and data analysis.")
-uploaded_files = st.file_uploader("📁 Upload CVs (PDF, scanned PDFs supported)", type=["pdf"], accept_multiple_files=True)
-api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+job_title = st.text_input("🎯 Role Hiring For")
+job_description = st.text_area("📌 Job Description / Requirements", height=150)
+custom_threshold = st.slider("📈 Fit Score Threshold", 0, 100, 50)
+uploaded_files = st.file_uploader("📁 Upload CVs (PDF)", type=["pdf"], accept_multiple_files=True)
+pasted_data = st.text_area("📝 Paste CV text(s) here (separate multiple with ---)", height=200)
+process = st.button("🚀 Analyze Candidates")
 
-# Skill mapping (optional preset)
+api_key = "sk-..."  # ← replace with your actual OpenRouter key
+
 skill_map = {
-    "Data Scientist": ["Python", "Machine Learning", "Data Analysis", "Statistics"],
+    "Data Scientist": ["Python", "Machine Learning", "Pandas", "Statistics"],
     "Frontend Developer": ["HTML", "CSS", "JavaScript", "React"],
-    "HR Manager": ["Recruitment", "Onboarding", "HR Policies"]
+    "HR Manager": ["Recruitment", "Onboarding", "Compliance", "Policies"],
 }
 
-# Extract text from PDFs (OCR fallback)
-def extract_text(file):
+def extract_text_from_pdf(path):
     try:
-        doc = fitz.open(stream=file.read(), filetype="pdf")
-        full_text = ""
+        doc = fitz.open(path)
+        text = ""
         for page in doc:
-            text = page.get_text()
-            if not text.strip():
-                # Fallback: OCR image from scanned page
-                pix = page.get_pixmap(dpi=300)
-                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                text = pytesseract.image_to_string(img)
-            full_text += text + "\n"
-        return full_text
+            txt = page.get_text().strip()
+            if not txt:
+                img = Image.frombytes("RGB", [page.get_pixmap(dpi=300).width, page.get_pixmap(dpi=300).height], page.get_pixmap().samples)
+                txt = pytesseract.image_to_string(img)
+            text += txt + "\n"
+        return text.strip()
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"[ERROR reading PDF] {e}"
 
-# Send prompt to OpenRouter with GPT-4 Turbo or Mistral
-def call_openrouter_api(prompt):
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+def extract_value(text, label, fallback="N/A", is_number=False):
+    pattern = re.escape(label) + r"[\s:]*([^\n]+)"
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match:
+        val = match.group(1).strip()
+        if is_number:
+            digits = re.findall(r"\d+", val)
+            return int(digits[0]) if digits else fallback
+        return val
+    return fallback
+
+def generate_prompt(cv, title, desc):
+    skills = skill_map.get(title, [])
+    skill_str = ", ".join(skills) if skills else "Infer from JD"
+    return f"""
+You are an expert AI HR evaluator.
+
+We are hiring for: {title}
+Job Description: {desc}
+Expected Skills: {skill_str}
+
+Candidate CV:
+{cv}
+
+Give me:
+1. Score out of 100
+2. Skill Match %
+3. Years of Experience
+4. Top Strengths
+5. Red Flags
+6. Final Verdict: Strong Fit / Moderate Fit / Not Recommended
+7. One-line hire recommendation
+8. Summary of education, certifications, tools, etc.
+"""
+
+def call_openrouter(prompt):
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     data = {
-        "model": "openai/gpt-4-turbo",  # or "mistralai/mistral-large"
+        "model": "openchat/openchat-3.5-0106",  # Use gpt-4 or mistral if needed
         "messages": [
-            {"role": "system", "content": "You are a world-class AI HR assistant. Give structured, helpful candidate evaluation."},
+            {"role": "system", "content": "You are a skilled HR AI analyzing candidate resumes."},
             {"role": "user", "content": prompt}
         ]
     }
     try:
-        res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
-        return res.json()["choices"][0]["message"]["content"]
+        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+        return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"[API Error] {e}"
 
-# Create the analysis prompt
-def generate_prompt(cv_text, job_title, job_description):
-    skills = skill_map.get(job_title, [])
-    skill_text = ", ".join(skills) if skills else "Let AI infer"
-    return f"""
-We are hiring for: {job_title}
-Job Description: {job_description}
-Expected Skills: {skill_text}
+if process and job_description and (uploaded_files or pasted_data):
+    with st.spinner("Analyzing..."):
+        candidates = []
 
-Candidate Resume:
-{cv_text}
+        if uploaded_files:
+            with tempfile.TemporaryDirectory() as temp:
+                for f in uploaded_files:
+                    path = os.path.join(temp, f.name)
+                    with open(path, "wb") as out:
+                        out.write(f.read())
+                    text = extract_text_from_pdf(path)
+                    candidates.append((f.name, text))
 
-Instructions:
-Evaluate this candidate based on the role.
-Return the following in clear format:
-🟢 AI Recommendation (Should be hired or not)
-📈 Fit Score (0–100)
-✅ Skill Match %
-⏳ Years of Relevant Experience
-💪 Top 3 Strengths
-⚠️ Red Flags or Concerns
-🧠 Why Selected or Not Selected
-"""
+        if pasted_data:
+            for i, chunk in enumerate(pasted_data.split("---")):
+                candidates.append((f"Pasted_{i+1}", chunk.strip()))
 
-# Button to run analysis
-if st.button("🚀 Analyze CVs"):
-    if not api_key:
-        st.error("Missing OpenRouter API key. Add it to Streamlit secrets.")
-    elif not uploaded_files:
-        st.warning("Upload at least one CV.")
-    else:
-        for file in uploaded_files:
-            with st.spinner(f"Analyzing {file.name}..."):
-                text = extract_text(file)
-                prompt = generate_prompt(text, job_title, job_description)
-                result = call_openrouter_api(prompt)
-                st.subheader(f"📄 {file.name}")
-                st.markdown(result)
+        results = []
+        for name, cv_text in candidates:
+            prompt = generate_prompt(cv_text, job_title, job_description)
+            reply = call_openrouter(prompt)
+
+            score = extract_value(reply, "Score", is_number=True)
+            match = extract_value(reply, "Skill Match", is_number=True)
+            experience = extract_value(reply, "Years of Experience")
+            strengths = extract_value(reply, "Top Strengths")
+            red_flags = extract_value(reply, "Red Flags")
+            verdict = extract_value(reply, "Final Verdict")
+            hire_rec = extract_value(reply, "hire recommendation")
+            summary = extract_value(reply, "Summary")
+
+            results.append({
+                "Candidate": name,
+                "Score": score,
+                "Match %": match,
+                "Experience": experience,
+                "Verdict": verdict,
+                "Hire": hire_rec,
+                "Strengths": strengths,
+                "Red Flags": red_flags,
+                "Summary": summary,
+                "Full Reply": reply
+            })
+
+        df = pd.DataFrame(results)
+        filtered = df[df["Score"] >= custom_threshold]
+        best = df[df["Score"] == df["Score"].max()]
+
+        st.success(f"✅ {len(filtered)} candidate(s) passed the threshold of {custom_threshold}")
+
+        for _, row in df.iterrows():
+            top = "best" if row["Candidate"] in best["Candidate"].values else ""
+            with st.expander(f"🧾 {row['Candidate']} — Score: {row['Score']}"):
+                st.markdown(f"<div class='{top}'>", unsafe_allow_html=True)
+                st.markdown(f"**✔ AI Recommendation:** {row['Hire']}")
+                st.markdown(f"**✅ Top Strengths:** {row['Strengths']}")
+                st.markdown(f"**🚫 Red Flags:** {row['Red Flags']}")
+                st.markdown(f"**📌 Summary:** {row['Summary']}")
+                st.markdown(f"**📈 Skill Match:** {row['Match %']}% | **Experience:** {row['Experience']}")
+                st.markdown("</div>", unsafe_allow_html=True)
+                with st.expander("📄 Full AI Response"):
+                    st.code(row["Full Reply"])
+
+        csv = df.to_csv(index=False).encode("utf-8")
+        now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+        st.download_button("📥 Download Candidate Report", csv, file_name=f"HR_Report_{now}.csv", mime="text/csv")
+
+else:
+    if process:
+        st.error("Please enter job description and upload or paste at least one CV.")
