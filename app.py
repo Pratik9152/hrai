@@ -34,12 +34,20 @@ st.title("🧠 All-in-One AI HR Assistant")
 # Input fields
 job_title = st.text_input("🎯 Hiring For (Job Title / Role)")
 job_description = st.text_area("📌 Job Description or Role Requirements", height=200)
+custom_threshold = st.slider("📈 Minimum Fit Score Required", 0, 100, 50)
 uploaded_zip = st.file_uploader("📁 Upload ZIP of candidate CVs (PDF, DOCX, TXT, scanned PDF)", type=["zip"])
 pasted_candidates = st.text_area("📝 Paste candidate data (separate candidates with ---)", height=300)
 process_button = st.button("🚀 Analyze Candidates")
 
 # Load OpenRouter API key from secrets
 api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+
+# Skill Mapping by Role (Sample)
+skill_map = {
+    "Data Scientist": ["Python", "Machine Learning", "Statistics", "Data Analysis"],
+    "Frontend Developer": ["HTML", "CSS", "JavaScript", "React"],
+    "HR Manager": ["Recruitment", "Onboarding", "HR Policies", "Employee Relations"],
+}
 
 # Utility Functions
 def extract_pdf_text(pdf_path):
@@ -59,7 +67,7 @@ def extract_pdf_text(pdf_path):
 
 def extract_number(text):
     match = re.search(r"\d+", text)
-    return int(match.group()) if match else 0
+    return int(match.group()) if match else 50  # Default to 50 if not found
 
 def call_openrouter_api(prompt):
     if not api_key:
@@ -83,6 +91,8 @@ def call_openrouter_api(prompt):
         return f"API Error: {str(e)}"
 
 def generate_prompt(cv_text, job_title, job_description):
+    role_skills = skill_map.get(job_title, [])
+    skills_required = ", ".join(role_skills) if role_skills else "[Let AI infer skills]"
     return f"""
 You are a senior HR evaluator AI.
 
@@ -90,6 +100,9 @@ We are hiring for the role: {job_title}
 
 Job Description:
 {job_description}
+
+Key Skills Expected:
+{skills_required}
 
 Resume:
 {cv_text}
@@ -168,8 +181,7 @@ if process_button and job_description and (uploaded_zip or pasted_candidates):
             st.success("✅ AI Analysis Complete")
             st.subheader("📊 Candidate Insights Dashboard")
 
-            min_score = st.slider("🔎 Filter candidates by minimum score", 0, 100, 50)
-            filtered_df = df[df["Score"] >= min_score]
+            filtered_df = df[df["Score"] >= custom_threshold]
 
             st.markdown(f"**🧑‍💼 {len(filtered_df)} candidates meet the criteria.**")
             st.plotly_chart(px.bar(filtered_df, x="Candidate", y="Score", color="Recommendation", text="Score"), use_container_width=True)
