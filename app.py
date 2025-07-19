@@ -83,6 +83,14 @@ def extract_number(text):
     match = re.search(r"\d+", text)
     return int(match.group()) if match else 50
 
+def extract_between(text, start_key, end_key=None):
+    try:
+        pattern = re.escape(start_key) + r"(.*?)(?=" + re.escape(end_key) + r"|$)" if end_key else re.escape(start_key) + r"(.*)"
+        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        return match.group(1).strip() if match else "N/A"
+    except Exception:
+        return "N/A"
+
 def call_openrouter_api(prompt):
     if not api_key:
         return "No API key configured."
@@ -131,17 +139,10 @@ Evaluate the following:
 7. If not recommended, explain why.
 8. Final Verdict: Strong Fit / Moderate Fit / Not Recommended.
 9. Provide a one-line recommendation: Should this candidate be hired or not with a reason.
+10. Summarize key insights and data extracted from resume (e.g., education, certifications, locations, tools used, etc.)
 
 Provide a structured report.
 """
-
-def extract_between(text, start_key, end_key=None):
-    try:
-        start = text.lower().index(start_key.lower()) + len(start_key)
-        end = text.lower().index(end_key.lower(), start) if end_key else None
-        return text[start:end].strip()
-    except:
-        return "N/A"
 
 # Processing Logic
 if process_button and job_description and (uploaded_zip or pasted_candidates):
@@ -178,6 +179,7 @@ if process_button and job_description and (uploaded_zip or pasted_candidates):
             justification = extract_between(ai_response, "Justify role fit:", "If not recommended")
             why_not = extract_between(ai_response, "If not recommended, explain why:", "Final Verdict")
             hiring_line = extract_between(ai_response, "Provide a one-line recommendation:")
+            summary_data = extract_between(ai_response, "Summarize key insights and data extracted from resume")
 
             results.append({
                 "Candidate": name,
@@ -190,6 +192,7 @@ if process_button and job_description and (uploaded_zip or pasted_candidates):
                 "Fit Justification": justification,
                 "Why Not Selected": why_not,
                 "AI Recommendation": hiring_line,
+                "Resume Summary": summary_data,
                 "Full AI Analysis": ai_response
             })
 
@@ -213,6 +216,7 @@ if process_button and job_description and (uploaded_zip or pasted_candidates):
                     st.markdown(f"**Fit Justification**:\n{row['Fit Justification']}")
                     st.markdown(f"**Why Not Selected**: {row['Why Not Selected']}")
                     st.markdown(f"**Skill Match %**: {row['Skill Match %']} | **Experience**: {row['Experience (Years)']}")
+                    st.markdown(f"**📌 Resume Summary**:\n{row['Resume Summary']}")
                     with st.expander("📄 Full AI Response"):
                         st.code(row["Full AI Analysis"], language="markdown")
 
